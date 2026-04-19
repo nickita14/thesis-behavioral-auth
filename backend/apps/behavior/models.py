@@ -65,6 +65,13 @@ class KeystrokeEvent(models.Model):
         on_delete=models.CASCADE,
         related_name="keystrokes",
     )
+    client_event_id = models.UUIDField(
+        unique=True,
+        editable=False,
+        null=True,
+        blank=True,
+        help_text="UUID assigned by the browser; used for idempotent ingestion",
+    )
     key_category = models.CharField(max_length=16, choices=KeyCategory)
     key_down_at = models.FloatField(help_text="ms from session start")
     key_up_at = models.FloatField(help_text="ms from session start")
@@ -109,6 +116,13 @@ class MouseEvent(models.Model):
         BehaviorSession,
         on_delete=models.CASCADE,
         related_name="mouse_events",
+    )
+    client_event_id = models.UUIDField(
+        unique=True,
+        editable=False,
+        null=True,
+        blank=True,
+        help_text="UUID assigned by the browser; used for idempotent ingestion",
     )
     event_type = models.CharField(max_length=8, choices=EventType)
     timestamp_ms = models.FloatField(help_text="ms from session start")
