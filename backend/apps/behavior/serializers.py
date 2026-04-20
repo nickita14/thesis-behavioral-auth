@@ -100,6 +100,10 @@ class EventBatchSerializer(serializers.Serializer):
     def validate(self, attrs: dict) -> dict:
         ks_count = len((attrs.get("keystrokes") or {}).get("data", []))
         ms_count = len((attrs.get("mouse") or {}).get("data", []))
+        if ks_count + ms_count == 0:
+            raise serializers.ValidationError(
+                "at least one of keystrokes or mouse must be non-empty"
+            )
         if ks_count + ms_count > MAX_BATCH_EVENTS:
             raise serializers.ValidationError(
                 f"batch exceeds maximum of {MAX_BATCH_EVENTS} events"

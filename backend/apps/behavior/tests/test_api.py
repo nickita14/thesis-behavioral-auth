@@ -280,3 +280,80 @@ def test_dwell_time_is_computed_for_bulk_inserted_keystrokes(
     authenticated_client.post(_events_url(session.session_token), payload, format="json")
     event = KeystrokeEvent.objects.get(client_event_id=cid)
     assert event.dwell_time_ms == pytest.approx(75.0)
+
+
+# ── partial batch (one type absent) ──────────────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_post_events_accepts_keystrokes_only(
+    authenticated_client: APIClient, session: BehaviorSession
+) -> None:
+    payload = {
+        "schema_version": 1,
+        "keystrokes": {
+            "fields": ["client_id", "cat", "down", "up", "flight"],
+            "data": [[str(uuid.uuid4()), "letter", 100.0, 180.0, None]],
+        },
+    }
+    response = authenticated_client.post(
+        _events_url(session.session_token), payload, format="json"
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["accepted"]["keystrokes"] == 1
+    assert data["accepted"]["mouse"] == 0
+
+
+@pytest.mark.django_db
+def test_post_events_accepts_mouse_only(
+    authenticated_client: APIClient, session: BehaviorSession
+) -> None:
+    payload = {
+        "schema_version": 1,
+        "mouse": {
+            "fields": ["client_id", "type", "t", "x", "y", "btn", "dx", "dy"],
+            "data": [[str(uuid.uuid4()), "move", 150.0, 300, 200, None, None, None]],
+        },
+    }
+    response = authenticated_client.post(
+        _events_url(session.session_token), payload, format="json"
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["accepted"]["keystrokes"] == 0
+    assert data["accepted"]["mouse"] == 1
+
+
+@pytest.mark.django_db
+def test_post_events_rejects_both_missing(
+    authenticated_client: APIClient, session: BehaviorSession
+) -> None:
+    payload = {"schema_version": 1}
+    response = authenticated_client.post(
+        _events_url(session.session_token), payload, format="json"
+    )
+    assert response.status_code == 400
+    assert "non-empty" in str(response.json())
+
+
+@pytest.mark.django_db
+def test_post_events_rejects_both_empty(
+    authenticated_client: APIClient, session: BehaviorSession
+) -> None:
+    payload = {
+        "schema_version": 1,
+        "keystrokes": {
+            "fields": ["client_id", "cat", "down", "up", "flight"],
+            "data": [],
+        },
+        "mouse": {
+            "fields": ["client_id", "type", "t", "x", "y", "btn", "dx", "dy"],
+            "data": [],
+        },
+    }
+    response = authenticated_client.post(
+        _events_url(session.session_token), payload, format="json"
+    )
+    assert response.status_code == 400
+    assert "non-empty" in str(response.json())
