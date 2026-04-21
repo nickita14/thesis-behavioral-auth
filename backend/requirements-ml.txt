@@ -12,7 +12,7 @@ seaborn==0.13.2
 # ML
 scikit-learn==1.6.0
 scipy==1.15.1
-xgboost==2.1.3
+xgboost==3.0.0
 
 # Utilities
 joblib==1.4.2
@@ -20,3 +20,4 @@ tqdm==4.67.1
 
 # For later (URL feature engineering)
 tldextract==5.1.3
+ucimlrepo
