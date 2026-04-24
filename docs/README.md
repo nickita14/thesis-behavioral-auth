@@ -13,6 +13,7 @@ separately in Word/docx according to university requirements.
 - `drafts/04_chapter_3_implementation.md` — chapter III, implementation.
 - `drafts/05_chapter_4_testing.md` — chapter IV, testing and results.
 - `drafts/06_conclusion.md` — conclusion draft.
+- `drafts/full_thesis_draft.md` — assembled Markdown draft with table of contents and all main thesis sections.
 - `drafts/bibliography.md` — draft bibliography.
 - `drafts/figures_plan.md` — planned diagrams, screenshots, and presentation visuals.
 - `drafts/defense_questions.md` — possible defense questions and short answers.
