@@ -257,6 +257,7 @@ yarn-error.log*
 # IDE
 .vscode/settings.json
 .idea/
+.codex/
 *.swp
 *.swo
 .DS_Store
@@ -285,6 +286,7 @@ dist/
 
 data/raw/*
 data/processed/*
+data/external/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 

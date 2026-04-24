@@ -69,3 +69,71 @@ data/             Datasets (gitignored)
 cd backend
 pytest
 ```
+
+## Phishing Module
+
+The phishing API is exposed at:
+
+```text
+POST /api/phishing/check/
+```
+
+Request body:
+
+```json
+{
+  "url": "https://example.com/login"
+}
+```
+
+The endpoint validates the URL, calls the phishing detector through the service
+layer, and stores an audit record in `PhishingEvent`.
+
+### Model Artifact
+
+The XGBoost model artifact is configured with `PHISHING_MODEL_PATH`.
+
+Default local value:
+
+```text
+../data/models/phishing_xgboost_v1.joblib
+```
+
+This path is resolved from the `backend/` directory when loaded from
+`backend/.env`. Keep model artifacts out of source code and do not hardcode
+absolute machine-specific paths.
+
+If needed, override it in `backend/.env`:
+
+```env
+PHISHING_MODEL_PATH=../data/models/phishing_xgboost_v1.joblib
+BEHAVIOR_ALLOW_ANONYMOUS_SESSIONS=True
+```
+
+### Phishing Tests
+
+Run the phishing test suite from the repository root:
+
+```bash
+XDG_CACHE_HOME=/tmp .venv/bin/python -m pytest backend/apps/phishing/tests -v
+```
+
+`XDG_CACHE_HOME=/tmp` keeps `tldextract` cache writes in a writable temporary
+directory. Without it, local sandboxed runs may fail when `tldextract` tries to
+write under the user's home cache directory.
+
+## Behavior Collection
+
+The behavior API collects session, keystroke, and mouse events. Development and
+demo runs allow anonymous behavior sessions by default for pre-auth login and
+phishing collection scenarios:
+
+```env
+BEHAVIOR_ALLOW_ANONYMOUS_SESSIONS=True
+```
+
+For production transaction authentication, set
+`BEHAVIOR_ALLOW_ANONYMOUS_SESSIONS=False` so behavior sessions must be attached
+to an authenticated user. If pre-auth collection is needed in production, enable
+it deliberately for that flow rather than treating anonymous sessions as the
+default transaction-authentication path.

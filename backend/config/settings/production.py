@@ -15,6 +15,14 @@ DEBUG = False
 
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS")
 
+PHISHING_MODEL_PATH = resolve_backend_path(
+    env.path("PHISHING_MODEL_PATH", default=PHISHING_MODEL_PATH)
+)
+BEHAVIOR_ALLOW_ANONYMOUS_SESSIONS = env.bool(
+    "BEHAVIOR_ALLOW_ANONYMOUS_SESSIONS",
+    default=False,
+)
+
 DATABASES = {
     "default": env.db("DATABASE_URL"),
 }

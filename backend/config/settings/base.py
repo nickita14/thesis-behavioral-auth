@@ -84,6 +84,17 @@ STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+PHISHING_MODEL_PATH = BASE_DIR.parent / "data" / "models" / "phishing_xgboost_v1.joblib"
+BEHAVIOR_ALLOW_ANONYMOUS_SESSIONS = False
+
+
+def resolve_backend_path(path: str | Path) -> Path:
+    """Resolve relative env paths from the Django backend directory."""
+    candidate = Path(path)
+    if candidate.is_absolute():
+        return candidate
+    return (BASE_DIR / candidate).resolve()
+
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.SessionAuthentication",

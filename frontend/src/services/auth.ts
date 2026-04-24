@@ -12,6 +12,7 @@ export async function register(payload: RegisterPayload): Promise<User> {
 }
 
 export async function login(payload: LoginPayload): Promise<User> {
+  await ensureCsrf()
   const { data } = await api.post<User>('/auth/login/', payload)
   return data
 }

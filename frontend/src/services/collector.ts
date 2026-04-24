@@ -1,5 +1,5 @@
 import type { KeyCategory, KeystrokeRow, MouseEventRow, MouseEventType } from '@/types/api'
-import { endSession, postEvents, startSession } from './behavior'
+import { endSession, postEvents, startSession, toKeystrokeEvents, toMouseEvent } from './behavior'
 
 const BATCH_SIZE_THRESHOLD = 100
 const BATCH_TIME_MS = 5000
@@ -117,16 +117,30 @@ class BehaviorCollector {
 
     // fetch with keepalive supports headers (unlike sendBeacon)
     const csrfToken = this.getCsrfToken()
-    void fetch(`/api/behavior/sessions/${this.sessionToken}/events/`, {
-      method: 'POST',
-      keepalive: true,
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRFToken': csrfToken,
-      },
-      body: JSON.stringify(payload),
-    })
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': csrfToken,
+    }
+    const keystrokes = payload.keystrokes?.data ?? []
+    if (keystrokes.length > 0) {
+      void fetch(`/api/behavior/sessions/${this.sessionToken}/keystrokes/`, {
+        method: 'POST',
+        keepalive: true,
+        credentials: 'include',
+        headers,
+        body: JSON.stringify({ events: keystrokes.map(toKeystrokeEvents).flat() }),
+      })
+    }
+    const mouse = payload.mouse?.data ?? []
+    if (mouse.length > 0) {
+      void fetch(`/api/behavior/sessions/${this.sessionToken}/mouse/`, {
+        method: 'POST',
+        keepalive: true,
+        credentials: 'include',
+        headers,
+        body: JSON.stringify({ events: mouse.map(toMouseEvent) }),
+      })
+    }
     this.keystrokeBuffer = []
     this.mouseBuffer = []
   }
@@ -135,7 +149,7 @@ class BehaviorCollector {
 
   async startSession(isEnrollment: boolean): Promise<void> {
     const session = await startSession(isEnrollment)
-    this.sessionToken = session.session_token
+    this.sessionToken = session.id
     this.sessionStart = Date.now()
     this.lastKeyUpAt = null
     this.keystrokeBuffer = []

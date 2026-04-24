@@ -7,4 +7,5 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/auth/", include("apps.accounts.urls", namespace="accounts")),
     path("api/behavior/", include("apps.behavior.urls", namespace="behavior")),
+    path("api/phishing/", include("apps.phishing.urls", namespace="phishing")),
 ]
