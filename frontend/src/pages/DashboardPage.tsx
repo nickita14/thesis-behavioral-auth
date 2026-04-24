@@ -41,7 +41,7 @@ export function DashboardPage() {
         const response = await getDashboardData()
         if (active) setData(response)
       } catch {
-        if (active) setError('Не удалось загрузить demo telemetry. Попробуйте обновить страницу.')
+        if (active) setError('Не удалось загрузить telemetry. Попробуйте обновить страницу.')
       } finally {
         if (active) setIsLoading(false)
       }
@@ -87,7 +87,7 @@ export function DashboardPage() {
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-              Transaction authentication demo
+              Transaction authentication
             </p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight">
               Security dashboard для {user?.username}

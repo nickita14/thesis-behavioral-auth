@@ -51,7 +51,7 @@ export function TransactionPage() {
     <div className="grid gap-6 py-8 lg:grid-cols-[1fr_0.9fr]">
       <Card>
         <CardHeader>
-          <CardTitle>Transaction authentication demo</CardTitle>
+          <CardTitle>Transaction authentication</CardTitle>
           <CardDescription>
             Создаёт TransactionAttempt и RiskAssessment без ML risk engine. Behavior session
             прикрепляется автоматически, если collector активен.
