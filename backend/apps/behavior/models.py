@@ -7,99 +7,83 @@ from django.db import models
 
 
 class BehaviorSession(models.Model):
-    """One continuous interaction session for a user.
-
-    Created when the user opens a page that collects behavioral signals.
-    Enrollment sessions (is_enrollment=True) are used to train the
-    per-user anomaly detector; subsequent sessions are scored against it.
-    """
+    """One browser/user interaction session used for behavioral collection."""
 
     class Meta:
         ordering = ["-started_at"]
         indexes = [
             models.Index(fields=["user", "started_at"]),
-            models.Index(fields=["session_token"]),
+            models.Index(fields=["session_key"]),
+            models.Index(fields=["started_at"]),
         ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="behavior_sessions",
     )
+    session_key = models.CharField(max_length=128, null=True, blank=True)
     started_at = models.DateTimeField(auto_now_add=True)
     ended_at = models.DateTimeField(null=True, blank=True)
+    context = models.JSONField(default=dict)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
     user_agent = models.TextField(blank=True)
-    ip_address = models.GenericIPAddressField()
     is_enrollment = models.BooleanField(default=False)
-    session_token = models.UUIDField(default=uuid.uuid4, unique=True)
+
+    @property
+    def duration_ms(self) -> int | None:
+        if self.ended_at is None:
+            return None
+        return int((self.ended_at - self.started_at).total_seconds() * 1000)
 
     def __str__(self) -> str:
         kind = "enrollment" if self.is_enrollment else "session"
-        return f"{self.user} — {kind} @ {self.started_at:%Y-%m-%d %H:%M}"
+        return f"{kind} {self.id} @ {self.started_at:%Y-%m-%d %H:%M}"
 
 
 class KeystrokeEvent(models.Model):
-    """Single key press/release event captured in a behavior session.
+    """Privacy-safe keystroke event.
 
-    Timestamps are stored as milliseconds from session start so that
-    absolute wall-clock time is not needed for feature extraction.
-    dwell_time_ms is computed on save() from key_up_at − key_down_at
-    and stored in the DB to allow indexed queries and aggregation.
+    Raw typed values are intentionally not stored. If the API receives
+    key_value, only a one-way hash is persisted so passwords or typed text
+    cannot be reconstructed from the behavioral dataset.
     """
 
-    class KeyCategory(models.TextChoices):
-        LETTER = "letter", "Letter"
-        DIGIT = "digit", "Digit"
-        SPECIAL = "special", "Special"
-        MODIFIER = "modifier", "Modifier"
+    class EventType(models.TextChoices):
+        KEYDOWN = "keydown", "Key down"
+        KEYUP = "keyup", "Key up"
 
     class Meta:
-        ordering = ["key_down_at"]
+        ordering = ["timestamp_ms", "id"]
         indexes = [
-            models.Index(fields=["session", "key_down_at"]),
+            models.Index(fields=["behavior_session", "timestamp_ms"]),
+            models.Index(fields=["event_type"]),
         ]
 
-    session = models.ForeignKey(
+    behavior_session = models.ForeignKey(
         BehaviorSession,
         on_delete=models.CASCADE,
-        related_name="keystrokes",
+        related_name="keystroke_events",
     )
-    client_event_id = models.UUIDField(
-        unique=True,
-        editable=False,
-        null=True,
-        blank=True,
-        help_text="UUID assigned by the browser; used for idempotent ingestion",
-    )
-    key_category = models.CharField(max_length=16, choices=KeyCategory)
-    key_down_at = models.FloatField(help_text="ms from session start")
-    key_up_at = models.FloatField(help_text="ms from session start")
-    dwell_time_ms = models.FloatField(
-        editable=False,
-        help_text="key_up_at − key_down_at, stored for indexing",
-    )
-    flight_time_ms = models.FloatField(
-        null=True,
-        blank=True,
-        help_text="Gap between previous key_up and this key_down",
-    )
-
-    def save(self, *args, **kwargs) -> None:
-        self.dwell_time_ms = self.key_up_at - self.key_down_at
-        super().save(*args, **kwargs)
+    event_type = models.CharField(max_length=16, choices=EventType)
+    key_code = models.CharField(max_length=64, blank=True)
+    key_value_hash = models.CharField(max_length=128, blank=True)
+    timestamp_ms = models.BigIntegerField()
+    relative_time_ms = models.IntegerField()
+    dwell_time_ms = models.IntegerField(null=True, blank=True)
+    flight_time_ms = models.IntegerField(null=True, blank=True)
+    metadata = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self) -> str:
-        return f"[{self.key_category}] dwell={self.dwell_time_ms:.1f}ms @ {self.key_down_at:.0f}ms"
+        return f"{self.event_type} {self.key_code or '<unknown>'} @ {self.timestamp_ms}ms"
 
 
 class MouseEvent(models.Model):
-    """Single mouse/touch/scroll event captured in a behavior session.
-
-    Coordinates are in CSS pixels relative to the viewport.
-    button and delta_* fields are type-specific: button is set for
-    click events, delta_* for scroll events, both null otherwise.
-    """
+    """Mouse movement, click, or scroll event captured in a behavior session."""
 
     class EventType(models.TextChoices):
         MOVE = "move", "Move"
@@ -107,30 +91,27 @@ class MouseEvent(models.Model):
         SCROLL = "scroll", "Scroll"
 
     class Meta:
-        ordering = ["timestamp_ms"]
+        ordering = ["timestamp_ms", "id"]
         indexes = [
-            models.Index(fields=["session", "timestamp_ms"]),
+            models.Index(fields=["behavior_session", "timestamp_ms"]),
+            models.Index(fields=["event_type"]),
         ]
 
-    session = models.ForeignKey(
+    behavior_session = models.ForeignKey(
         BehaviorSession,
         on_delete=models.CASCADE,
         related_name="mouse_events",
     )
-    client_event_id = models.UUIDField(
-        unique=True,
-        editable=False,
-        null=True,
-        blank=True,
-        help_text="UUID assigned by the browser; used for idempotent ingestion",
-    )
-    event_type = models.CharField(max_length=8, choices=EventType)
-    timestamp_ms = models.FloatField(help_text="ms from session start")
-    x = models.IntegerField()
-    y = models.IntegerField()
-    button = models.CharField(max_length=16, null=True, blank=True)
-    delta_x = models.IntegerField(null=True, blank=True)
-    delta_y = models.IntegerField(null=True, blank=True)
+    event_type = models.CharField(max_length=16, choices=EventType)
+    x = models.IntegerField(null=True, blank=True)
+    y = models.IntegerField(null=True, blank=True)
+    button = models.CharField(max_length=32, blank=True)
+    scroll_delta_x = models.FloatField(null=True, blank=True)
+    scroll_delta_y = models.FloatField(null=True, blank=True)
+    timestamp_ms = models.BigIntegerField()
+    relative_time_ms = models.IntegerField()
+    metadata = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self) -> str:
-        return f"[{self.event_type}] ({self.x}, {self.y}) @ {self.timestamp_ms:.0f}ms"
+        return f"{self.event_type} @ {self.timestamp_ms}ms"

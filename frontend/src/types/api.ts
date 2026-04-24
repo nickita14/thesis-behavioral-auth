@@ -17,21 +17,15 @@ export interface LoginPayload {
 }
 
 export interface BehaviorSession {
-  session_token: string
+  id: string
   started_at: string
-  ended_at: string | null
   is_enrollment: boolean
-  ip_address: string
-  counts?: {
-    keystrokes: number
-    mouse_events: number
-  }
+  context: Record<string, unknown>
 }
 
 export interface StartSessionPayload {
   is_enrollment: boolean
-  user_agent: string
-  client_started_at: string
+  context?: Record<string, unknown>
 }
 
 export type KeyCategory = 'letter' | 'digit' | 'special' | 'modifier'
@@ -70,8 +64,18 @@ export interface BatchEventsPayload {
 }
 
 export interface BatchEventsResponse {
-  accepted: { keystrokes: number; mouse: number }
-  duplicates: { keystrokes: number; mouse: number }
+  created: {
+    keystrokes: number
+    mouse: number
+  }
+}
+
+export interface BehaviorSummary {
+  id: string
+  duration_ms: number | null
+  keystroke_count: number
+  mouse_count: number
+  is_enrollment: boolean
 }
 
 export interface ApiError {

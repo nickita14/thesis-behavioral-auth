@@ -3,357 +3,298 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from django.contrib.auth import get_user_model
+from django.test import override_settings
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework.test import APIClient
 
-from apps.accounts.models import User
 from apps.behavior.models import BehaviorSession, KeystrokeEvent, MouseEvent
+from apps.behavior.services import BehaviorEventService
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────
+def _session_create_url() -> str:
+    return reverse("behavior:session-create")
 
 
-def _start_url() -> str:
-    return reverse("behavior:session-start")
+def _session_end_url(session_id: uuid.UUID) -> str:
+    return reverse("behavior:session-end", kwargs={"session_id": session_id})
 
 
-def _end_url(token: uuid.UUID) -> str:
-    return reverse("behavior:session-end", kwargs={"token": token})
+def _keystrokes_url(session_id: uuid.UUID) -> str:
+    return reverse("behavior:session-keystrokes", kwargs={"session_id": session_id})
 
 
-def _events_url(token: uuid.UUID) -> str:
-    return reverse("behavior:session-events", kwargs={"token": token})
+def _mouse_url(session_id: uuid.UUID) -> str:
+    return reverse("behavior:session-mouse", kwargs={"session_id": session_id})
 
 
-def _detail_url(token: uuid.UUID) -> str:
-    return reverse("behavior:session-detail", kwargs={"token": token})
+def _summary_url(session_id: uuid.UUID) -> str:
+    return reverse("behavior:session-summary", kwargs={"session_id": session_id})
 
 
-def _keystroke_batch(*pairs: tuple[str, float, float, float | None]) -> dict:
-    """Build a minimal valid columnar event payload with only keystrokes."""
+def _keystroke_payload() -> dict:
     return {
-        "schema_version": 1,
-        "keystrokes": {
-            "fields": ["client_id", "cat", "down", "up", "flight"],
-            "data": [
-                [cid, "letter", down, up, flight]
-                for cid, down, up, flight in pairs
-            ],
-        },
+        "events": [
+            {
+                "event_type": "keydown",
+                "key_code": "KeyA",
+                "key_value": "a",
+                "timestamp_ms": 123456,
+                "relative_time_ms": 120,
+            },
+            {
+                "event_type": "keyup",
+                "key_code": "KeyA",
+                "key_value": "a",
+                "timestamp_ms": 123536,
+                "relative_time_ms": 200,
+                "dwell_time_ms": 80,
+                "flight_time_ms": 30,
+            },
+        ]
     }
 
 
-# ── session start ─────────────────────────────────────────────────────────────
+def _mouse_payload() -> dict:
+    return {
+        "events": [
+            {
+                "event_type": "move",
+                "x": 120,
+                "y": 240,
+                "timestamp_ms": 123456,
+                "relative_time_ms": 150,
+            },
+            {
+                "event_type": "scroll",
+                "scroll_delta_x": 0.0,
+                "scroll_delta_y": -12.5,
+                "timestamp_ms": 123500,
+                "relative_time_ms": 194,
+            },
+        ]
+    }
 
 
 @pytest.mark.django_db
-def test_start_session_creates_record_and_returns_token(authenticated_client: APIClient) -> None:
-    response = authenticated_client.post(
-        _start_url(),
-        {"is_enrollment": False, "user_agent": "TestAgent/1.0"},
+def test_create_behavior_session_returns_201(api_client: APIClient) -> None:
+    response = api_client.post(
+        _session_create_url(),
+        {"is_enrollment": True, "context": {"page": "login", "scenario": "demo"}},
         format="json",
+        HTTP_USER_AGENT="pytest-agent",
     )
+
     assert response.status_code == 201
     data = response.json()
-    assert "session_token" in data
+    assert "id" in data
     assert "started_at" in data
-    assert BehaviorSession.objects.filter(session_token=data["session_token"]).exists()
-
-
-@pytest.mark.django_db
-def test_start_session_requires_authentication() -> None:
-    client = APIClient()
-    response = client.post(_start_url(), {}, format="json")
-    assert response.status_code == 403
-
-
-# ── session end ───────────────────────────────────────────────────────────────
+    assert data["is_enrollment"] is True
+    assert data["context"] == {"page": "login", "scenario": "demo"}
+    session = BehaviorSession.objects.get(id=data["id"])
+    assert session.user is None
+    assert session.user_agent == "pytest-agent"
 
 
 @pytest.mark.django_db
 def test_end_session_sets_ended_at(
-    authenticated_client: APIClient, session: BehaviorSession
+    api_client: APIClient,
+    behavior_session: BehaviorSession,
 ) -> None:
-    assert session.ended_at is None
-    response = authenticated_client.post(_end_url(session.session_token))
-    assert response.status_code == 204
-    session.refresh_from_db()
-    assert session.ended_at is not None
+    response = api_client.post(_session_end_url(behavior_session.id), format="json")
 
-
-@pytest.mark.django_db
-def test_end_session_is_idempotent(
-    authenticated_client: APIClient, closed_session: BehaviorSession
-) -> None:
-    first = authenticated_client.post(_end_url(closed_session.session_token))
-    second = authenticated_client.post(_end_url(closed_session.session_token))
-    assert first.status_code == 204
-    assert second.status_code == 204
-
-
-@pytest.mark.django_db
-def test_end_session_other_user_returns_404(
-    other_user: User, session: BehaviorSession
-) -> None:
-    client = APIClient()
-    client.force_authenticate(user=other_user)
-    response = client.post(_end_url(session.session_token))
-    assert response.status_code == 404
-
-
-# ── event batch ───────────────────────────────────────────────────────────────
-
-
-def _valid_batch() -> dict:
-    return {
-        "schema_version": 1,
-        "keystrokes": {
-            "fields": ["client_id", "cat", "down", "up", "flight"],
-            "data": [
-                [str(uuid.uuid4()), "letter", 100.0, 180.0, None],
-                [str(uuid.uuid4()), "digit", 200.0, 265.0, 20.0],
-            ],
-        },
-        "mouse": {
-            "fields": ["client_id", "type", "t", "x", "y", "btn", "dx", "dy"],
-            "data": [
-                [str(uuid.uuid4()), "move", 150.0, 300, 200, None, None, None],
-            ],
-        },
-    }
-
-
-@pytest.mark.django_db
-def test_post_events_accepts_valid_batch(
-    authenticated_client: APIClient, session: BehaviorSession
-) -> None:
-    response = authenticated_client.post(
-        _events_url(session.session_token), _valid_batch(), format="json"
-    )
     assert response.status_code == 200
+    behavior_session.refresh_from_db()
+    assert behavior_session.ended_at is not None
 
 
 @pytest.mark.django_db
-def test_post_events_returns_correct_counts(
-    authenticated_client: APIClient, session: BehaviorSession
+def test_keystroke_batch_insert_creates_events(
+    api_client: APIClient,
+    behavior_session: BehaviorSession,
 ) -> None:
-    response = authenticated_client.post(
-        _events_url(session.session_token), _valid_batch(), format="json"
+    response = api_client.post(
+        _keystrokes_url(behavior_session.id),
+        _keystroke_payload(),
+        format="json",
     )
-    data = response.json()
-    assert data["accepted"]["keystrokes"] == 2
-    assert data["accepted"]["mouse"] == 1
-    assert data["duplicates"]["keystrokes"] == 0
-    assert data["duplicates"]["mouse"] == 0
+
+    assert response.status_code == 201
+    assert response.json()["created"] == 2
+    assert behavior_session.keystroke_events.count() == 2
 
 
 @pytest.mark.django_db
-def test_post_events_idempotent_on_duplicate_client_ids(
-    authenticated_client: APIClient, session: BehaviorSession
+def test_raw_key_value_is_not_stored(
+    api_client: APIClient,
+    behavior_session: BehaviorSession,
 ) -> None:
-    batch = _valid_batch()
-    authenticated_client.post(_events_url(session.session_token), batch, format="json")
-    response = authenticated_client.post(
-        _events_url(session.session_token), batch, format="json"
+    api_client.post(
+        _keystrokes_url(behavior_session.id),
+        _keystroke_payload(),
+        format="json",
     )
-    data = response.json()
-    assert data["duplicates"]["keystrokes"] == 2
-    assert data["duplicates"]["mouse"] == 1
-    assert data["accepted"]["keystrokes"] == 0
-    assert data["accepted"]["mouse"] == 0
+
+    event = KeystrokeEvent.objects.filter(key_code="KeyA").first()
+    assert event is not None
+    assert not hasattr(event, "key_value")
+    assert event.key_value_hash != "a"
 
 
 @pytest.mark.django_db
-def test_post_events_rejects_unsupported_schema_version(
-    authenticated_client: APIClient, session: BehaviorSession
+def test_key_value_hash_is_stored_when_key_value_provided(
+    api_client: APIClient,
+    behavior_session: BehaviorSession,
 ) -> None:
-    payload = {"schema_version": 99}
-    response = authenticated_client.post(
-        _events_url(session.session_token), payload, format="json"
+    api_client.post(
+        _keystrokes_url(behavior_session.id),
+        _keystroke_payload(),
+        format="json",
     )
-    assert response.status_code == 400
-    assert "unsupported schema version" in str(response.json())
+
+    event = KeystrokeEvent.objects.filter(event_type="keydown").get()
+    assert event.key_value_hash == BehaviorEventService.hash_key_value("a")
+    assert len(event.key_value_hash) == 64
 
 
 @pytest.mark.django_db
-def test_post_events_rejects_invalid_field_order(
-    authenticated_client: APIClient, session: BehaviorSession
+def test_mouse_batch_insert_creates_events(
+    api_client: APIClient,
+    behavior_session: BehaviorSession,
 ) -> None:
-    payload = {
-        "schema_version": 1,
-        "keystrokes": {
-            "fields": ["client_id", "up", "down", "cat", "flight"],  # wrong order
-            "data": [],
-        },
-    }
-    response = authenticated_client.post(
-        _events_url(session.session_token), payload, format="json"
+    response = api_client.post(
+        _mouse_url(behavior_session.id),
+        _mouse_payload(),
+        format="json",
     )
-    assert response.status_code == 400
+
+    assert response.status_code == 201
+    assert response.json()["created"] == 2
+    assert behavior_session.mouse_events.count() == 2
 
 
 @pytest.mark.django_db
-def test_post_events_rejects_closed_session(
-    authenticated_client: APIClient, closed_session: BehaviorSession
-) -> None:
-    response = authenticated_client.post(
-        _events_url(closed_session.session_token), _valid_batch(), format="json"
+def test_invalid_session_id_returns_404(api_client: APIClient) -> None:
+    response = api_client.post(
+        _keystrokes_url(uuid.uuid4()),
+        _keystroke_payload(),
+        format="json",
     )
-    assert response.status_code == 409
 
-
-@pytest.mark.django_db
-def test_post_events_other_user_returns_404(
-    other_user: User, session: BehaviorSession
-) -> None:
-    client = APIClient()
-    client.force_authenticate(user=other_user)
-    response = client.post(_events_url(session.session_token), _valid_batch(), format="json")
     assert response.status_code == 404
 
 
 @pytest.mark.django_db
-def test_post_events_rejects_oversized_batch(
-    authenticated_client: APIClient, session: BehaviorSession
+def test_invalid_event_type_returns_400(
+    api_client: APIClient,
+    behavior_session: BehaviorSession,
 ) -> None:
-    rows = [
-        [str(uuid.uuid4()), "letter", float(i), float(i) + 80, None]
-        for i in range(501)
-    ]
-    payload = {
-        "schema_version": 1,
-        "keystrokes": {
-            "fields": ["client_id", "cat", "down", "up", "flight"],
-            "data": rows,
-        },
-    }
-    response = authenticated_client.post(
-        _events_url(session.session_token), payload, format="json"
+    payload = _keystroke_payload()
+    payload["events"][0]["event_type"] = "keypress"
+
+    response = api_client.post(
+        _keystrokes_url(behavior_session.id),
+        payload,
+        format="json",
     )
+
     assert response.status_code == 400
-
-
-# ── session detail ────────────────────────────────────────────────────────────
+    assert "event_type" in str(response.json())
 
 
 @pytest.mark.django_db
-def test_get_session_returns_counts(
-    authenticated_client: APIClient, session: BehaviorSession
+def test_summary_returns_correct_counts(
+    api_client: APIClient,
+    behavior_session: BehaviorSession,
 ) -> None:
-    KeystrokeEvent.objects.create(
-        session=session,
-        key_category="letter",
-        key_down_at=100.0,
-        key_up_at=180.0,
-        dwell_time_ms=80.0,
-    )
-    MouseEvent.objects.create(
-        session=session,
-        event_type="move",
-        timestamp_ms=150.0,
-        x=100,
-        y=200,
-    )
-    response = authenticated_client.get(_detail_url(session.session_token))
+    api_client.post(_keystrokes_url(behavior_session.id), _keystroke_payload(), format="json")
+    api_client.post(_mouse_url(behavior_session.id), _mouse_payload(), format="json")
+    behavior_session.ended_at = timezone.now()
+    behavior_session.save(update_fields=["ended_at"])
+
+    response = api_client.get(_summary_url(behavior_session.id))
+
     assert response.status_code == 200
     data = response.json()
-    assert data["counts"]["keystrokes"] == 1
-    assert data["counts"]["mouse_events"] == 1
-    assert str(session.session_token) == data["session_token"]
-
-
-# ── dwell_time computed in bulk_create ────────────────────────────────────────
-
-
-@pytest.mark.django_db
-def test_dwell_time_is_computed_for_bulk_inserted_keystrokes(
-    authenticated_client: APIClient, session: BehaviorSession
-) -> None:
-    cid = str(uuid.uuid4())
-    payload = {
-        "schema_version": 1,
-        "keystrokes": {
-            "fields": ["client_id", "cat", "down", "up", "flight"],
-            "data": [[cid, "letter", 1000.0, 1075.0, None]],
-        },
-    }
-    authenticated_client.post(_events_url(session.session_token), payload, format="json")
-    event = KeystrokeEvent.objects.get(client_event_id=cid)
-    assert event.dwell_time_ms == pytest.approx(75.0)
-
-
-# ── partial batch (one type absent) ──────────────────────────────────────────
+    assert data["id"] == str(behavior_session.id)
+    assert data["duration_ms"] is not None
+    assert data["keystroke_count"] == 2
+    assert data["mouse_count"] == 2
+    assert data["is_enrollment"] is False
 
 
 @pytest.mark.django_db
-def test_post_events_accepts_keystrokes_only(
-    authenticated_client: APIClient, session: BehaviorSession
-) -> None:
-    payload = {
-        "schema_version": 1,
-        "keystrokes": {
-            "fields": ["client_id", "cat", "down", "up", "flight"],
-            "data": [[str(uuid.uuid4()), "letter", 100.0, 180.0, None]],
-        },
-    }
-    response = authenticated_client.post(
-        _events_url(session.session_token), payload, format="json"
+@override_settings(BEHAVIOR_ALLOW_ANONYMOUS_SESSIONS=True)
+def test_anonymous_session_allowed(api_client: APIClient) -> None:
+    response = api_client.post(
+        _session_create_url(),
+        {"is_enrollment": False, "context": {}},
+        format="json",
     )
-    assert response.status_code == 200
-    data = response.json()
-    assert data["accepted"]["keystrokes"] == 1
-    assert data["accepted"]["mouse"] == 0
+
+    assert response.status_code == 201
+    session = BehaviorSession.objects.get(id=response.json()["id"])
+    assert session.user is None
 
 
 @pytest.mark.django_db
-def test_post_events_accepts_mouse_only(
-    authenticated_client: APIClient, session: BehaviorSession
-) -> None:
-    payload = {
-        "schema_version": 1,
-        "mouse": {
-            "fields": ["client_id", "type", "t", "x", "y", "btn", "dx", "dy"],
-            "data": [[str(uuid.uuid4()), "move", 150.0, 300, 200, None, None, None]],
-        },
-    }
-    response = authenticated_client.post(
-        _events_url(session.session_token), payload, format="json"
+@override_settings(BEHAVIOR_ALLOW_ANONYMOUS_SESSIONS=False)
+def test_anonymous_session_rejected_when_disabled(api_client: APIClient) -> None:
+    response = api_client.post(
+        _session_create_url(),
+        {"is_enrollment": False, "context": {}},
+        format="json",
     )
-    assert response.status_code == 200
-    data = response.json()
-    assert data["accepted"]["keystrokes"] == 0
-    assert data["accepted"]["mouse"] == 1
+
+    assert response.status_code == 403
+    assert "anonymous behavior sessions are disabled" in response.json()["detail"].lower()
+    assert BehaviorSession.objects.count() == 0
 
 
 @pytest.mark.django_db
-def test_post_events_rejects_both_missing(
-    authenticated_client: APIClient, session: BehaviorSession
+@override_settings(BEHAVIOR_ALLOW_ANONYMOUS_SESSIONS=False)
+def test_authenticated_user_is_attached_to_behavior_session(
+    api_client: APIClient,
 ) -> None:
-    payload = {"schema_version": 1}
-    response = authenticated_client.post(
-        _events_url(session.session_token), payload, format="json"
+    user = get_user_model().objects.create_user(
+        username="behavior-user",
+        password="unused-test-password",
     )
-    assert response.status_code == 400
-    assert "non-empty" in str(response.json())
+    api_client.force_authenticate(user=user)
+
+    response = api_client.post(
+        _session_create_url(),
+        {"is_enrollment": True, "context": {"page": "transaction"}},
+        format="json",
+    )
+
+    assert response.status_code == 201
+    session = BehaviorSession.objects.get(id=response.json()["id"])
+    assert session.user == user
 
 
 @pytest.mark.django_db
-def test_post_events_rejects_both_empty(
-    authenticated_client: APIClient, session: BehaviorSession
-) -> None:
-    payload = {
-        "schema_version": 1,
-        "keystrokes": {
-            "fields": ["client_id", "cat", "down", "up", "flight"],
-            "data": [],
-        },
-        "mouse": {
-            "fields": ["client_id", "type", "t", "x", "y", "btn", "dx", "dy"],
-            "data": [],
-        },
-    }
-    response = authenticated_client.post(
-        _events_url(session.session_token), payload, format="json"
+def test_api_routes_are_wired(api_client: APIClient) -> None:
+    create_response = api_client.post(
+        reverse("behavior:session-create"),
+        {"is_enrollment": False, "context": {"page": "login"}},
+        format="json",
     )
-    assert response.status_code == 400
-    assert "non-empty" in str(response.json())
+    session_id = create_response.json()["id"]
+
+    assert create_response.status_code == 201
+    assert api_client.post(reverse("behavior:session-end", kwargs={"session_id": session_id})).status_code == 200
+    assert api_client.post(
+        reverse("behavior:session-keystrokes", kwargs={"session_id": session_id}),
+        _keystroke_payload(),
+        format="json",
+    ).status_code == 201
+    assert api_client.post(
+        reverse("behavior:session-mouse", kwargs={"session_id": session_id}),
+        _mouse_payload(),
+        format="json",
+    ).status_code == 201
+    assert api_client.get(
+        reverse("behavior:session-summary", kwargs={"session_id": session_id})
+    ).status_code == 200

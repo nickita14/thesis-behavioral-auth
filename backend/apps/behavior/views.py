@@ -1,214 +1,121 @@
 from __future__ import annotations
 
-import logging
-from typing import Any
-
 from django.db.models import Count
-from django.utils import timezone
+from django.shortcuts import get_object_or_404
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import BehaviorSession, KeystrokeEvent, MouseEvent
-from .permissions import IsSessionOwner
+from .models import BehaviorSession
 from .serializers import (
-    KEYSTROKE_FIELDS,
-    MOUSE_FIELDS,
-    EventBatchSerializer,
-    SessionDetailSerializer,
-    SessionStartResponseSerializer,
-    SessionStartSerializer,
+    BehaviorSessionCreateSerializer,
+    BehaviorSessionResponseSerializer,
+    BehaviorSummarySerializer,
+    KeystrokeBatchSerializer,
+    MouseBatchSerializer,
+)
+from .services import (
+    AnonymousBehaviorSessionRejected,
+    BehaviorEventService,
+    BehaviorSessionService,
 )
 
-logger = logging.getLogger(__name__)
 
+class BehaviorSessionCreateView(APIView):
+    """POST /api/behavior/sessions/ creates an anonymous or authenticated session."""
 
-class SessionStartView(APIView):
-    """POST /api/behavior/sessions/start/
-
-    Creates a new BehaviorSession for the authenticated user.
-    ip_address is always taken from the request, never from the body.
-    """
-
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
+    session_service = BehaviorSessionService()
 
     def post(self, request: Request) -> Response:
-        serializer = SessionStartSerializer(data=request.data)
+        serializer = BehaviorSessionCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-
-        session = BehaviorSession.objects.create(
-            user=request.user,
-            is_enrollment=serializer.validated_data["is_enrollment"],
-            user_agent=serializer.validated_data.get("user_agent", ""),
-            ip_address=request.META.get("REMOTE_ADDR", "127.0.0.1"),
+        try:
+            session = self.session_service.create_session(
+                user=request.user,
+                session_key=getattr(request.session, "session_key", None),
+                is_enrollment=serializer.validated_data["is_enrollment"],
+                context=serializer.validated_data["context"],
+                ip_address=request.META.get("REMOTE_ADDR"),
+                user_agent=request.META.get("HTTP_USER_AGENT", ""),
+            )
+        except AnonymousBehaviorSessionRejected as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+        return Response(
+            BehaviorSessionResponseSerializer(session).data,
+            status=status.HTTP_201_CREATED,
         )
 
-        response_data = SessionStartResponseSerializer(session).data
-        return Response(response_data, status=status.HTTP_201_CREATED)
 
+class BehaviorSessionEndView(APIView):
+    """POST /api/behavior/sessions/{session_id}/end/ closes a session."""
 
-class SessionEndView(APIView):
-    """POST /api/behavior/sessions/{token}/end/
+    permission_classes = [AllowAny]
+    session_service = BehaviorSessionService()
 
-    Closes the session by setting ended_at. Idempotent: calling it on an
-    already-closed session still returns 204.
-    """
-
-    permission_classes = [IsAuthenticated, IsSessionOwner]
-
-    def post(self, request: Request, token: str) -> Response:
-        session: BehaviorSession = request.behavior_session  # type: ignore[attr-defined]
-        if session.ended_at is None:
-            session.ended_at = timezone.now()
-            session.save(update_fields=["ended_at"])
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
-
-class EventBatchView(APIView):
-    """POST /api/behavior/sessions/{token}/events/
-
-    Accepts a columnar batch of keystroke and mouse events.
-    Uses bulk_create with ignore_conflicts=True for idempotent ingestion.
-    Duplicate detection is done via a pre-query on client_event_id.
-    """
-
-    permission_classes = [IsAuthenticated, IsSessionOwner]
-
-    def post(self, request: Request, token: str) -> Response:
-        session: BehaviorSession = request.behavior_session  # type: ignore[attr-defined]
-
-        if session.ended_at is not None:
-            logger.warning(
-                "EventBatchView: attempt to post events to closed session %s by user %s",
-                token,
-                request.user.pk,
-            )
-            return Response(
-                {"error": "session is already closed"},
-                status=status.HTTP_409_CONFLICT,
-            )
-
-        serializer = EventBatchSerializer(data=request.data)
-        if not serializer.is_valid():
-            logger.warning(
-                "EventBatchView: invalid payload from user %s: %s",
-                request.user.pk,
-                serializer.errors,
-            )
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        data = serializer.validated_data
-        ks_result = self._ingest_keystrokes(session, data.get("keystrokes"))
-        ms_result = self._ingest_mouse(session, data.get("mouse"))
-
+    def post(self, request: Request, session_id: str) -> Response:
+        session = get_object_or_404(BehaviorSession, id=session_id)
+        session = self.session_service.end_session(session)
         return Response(
-            {
-                "accepted": {
-                    "keystrokes": ks_result["accepted"],
-                    "mouse": ms_result["accepted"],
-                },
-                "duplicates": {
-                    "keystrokes": ks_result["duplicates"],
-                    "mouse": ms_result["duplicates"],
-                },
-            },
+            {"id": str(session.id), "ended_at": session.ended_at},
             status=status.HTTP_200_OK,
         )
 
-    def _ingest_keystrokes(
-        self, session: BehaviorSession, block: dict | None
-    ) -> dict[str, int]:
-        if not block:
-            return {"accepted": 0, "duplicates": 0}
 
-        rows = block["data"]
-        total = len(rows)
-        objects: list[KeystrokeEvent] = []
-        incoming_ids: list[Any] = []
+class KeystrokeBatchView(APIView):
+    """POST /api/behavior/sessions/{session_id}/keystrokes/ stores key events."""
 
-        for row in rows:
-            mapped = dict(zip(KEYSTROKE_FIELDS, row))
-            client_id = mapped["client_id"]
-            down = float(mapped["down"])
-            up = float(mapped["up"])
-            incoming_ids.append(client_id)
-            objects.append(
-                KeystrokeEvent(
-                    session=session,
-                    client_event_id=client_id,
-                    key_category=mapped["cat"],
-                    key_down_at=down,
-                    key_up_at=up,
-                    dwell_time_ms=up - down,  # save() not called by bulk_create
-                    flight_time_ms=mapped["flight"],
-                )
-            )
+    permission_classes = [AllowAny]
+    event_service = BehaviorEventService()
 
-        existing_ids = set(
-            KeystrokeEvent.objects.filter(
-                client_event_id__in=incoming_ids
-            ).values_list("client_event_id", flat=True)
+    def post(self, request: Request, session_id: str) -> Response:
+        session = get_object_or_404(BehaviorSession, id=session_id)
+        serializer = KeystrokeBatchSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        created = self.event_service.create_keystrokes(
+            session,
+            serializer.validated_data["events"],
         )
-        duplicates = len(existing_ids)
-        KeystrokeEvent.objects.bulk_create(objects, ignore_conflicts=True)
-        return {"accepted": total - duplicates, "duplicates": duplicates}
+        return Response({"created": len(created)}, status=status.HTTP_201_CREATED)
 
-    def _ingest_mouse(
-        self, session: BehaviorSession, block: dict | None
-    ) -> dict[str, int]:
-        if not block:
-            return {"accepted": 0, "duplicates": 0}
 
-        rows = block["data"]
-        total = len(rows)
-        objects: list[MouseEvent] = []
-        incoming_ids: list[Any] = []
+class MouseBatchView(APIView):
+    """POST /api/behavior/sessions/{session_id}/mouse/ stores mouse events."""
 
-        for row in rows:
-            mapped = dict(zip(MOUSE_FIELDS, row))
-            client_id = mapped["client_id"]
-            incoming_ids.append(client_id)
-            objects.append(
-                MouseEvent(
-                    session=session,
-                    client_event_id=client_id,
-                    event_type=mapped["type"],
-                    timestamp_ms=float(mapped["t"]),
-                    x=int(mapped["x"]),
-                    y=int(mapped["y"]),
-                    button=mapped["btn"],
-                    delta_x=mapped["dx"],
-                    delta_y=mapped["dy"],
-                )
-            )
+    permission_classes = [AllowAny]
+    event_service = BehaviorEventService()
 
-        existing_ids = set(
-            MouseEvent.objects.filter(
-                client_event_id__in=incoming_ids
-            ).values_list("client_event_id", flat=True)
+    def post(self, request: Request, session_id: str) -> Response:
+        session = get_object_or_404(BehaviorSession, id=session_id)
+        serializer = MouseBatchSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        created = self.event_service.create_mouse_events(
+            session,
+            serializer.validated_data["events"],
         )
-        duplicates = len(existing_ids)
-        MouseEvent.objects.bulk_create(objects, ignore_conflicts=True)
-        return {"accepted": total - duplicates, "duplicates": duplicates}
+        return Response({"created": len(created)}, status=status.HTTP_201_CREATED)
 
 
-class SessionDetailView(APIView):
-    """GET /api/behavior/sessions/{token}/
+class BehaviorSummaryView(APIView):
+    """GET /api/behavior/sessions/{session_id}/summary/ returns event counts."""
 
-    Returns session metadata and event counts aggregated in a single query.
-    """
+    permission_classes = [AllowAny]
 
-    permission_classes = [IsAuthenticated, IsSessionOwner]
-
-    def get(self, request: Request, token: str) -> Response:
-        # IsSessionOwner already fetched the session; re-fetch with annotations
-        # for counts (one query with two LEFT OUTER JOINs).
-        session = (
+    def get(self, request: Request, session_id: str) -> Response:
+        session = get_object_or_404(
             BehaviorSession.objects.annotate(
-                keystroke_count=Count("keystrokes", distinct=True),
-                mouse_event_count=Count("mouse_events", distinct=True),
-            ).get(session_token=token)
+                keystroke_count=Count("keystroke_events", distinct=True),
+                mouse_count=Count("mouse_events", distinct=True),
+            ),
+            id=session_id,
         )
-        return Response(SessionDetailSerializer(session).data)
+        data = {
+            "id": session.id,
+            "duration_ms": session.duration_ms,
+            "keystroke_count": session.keystroke_count,
+            "mouse_count": session.mouse_count,
+            "is_enrollment": session.is_enrollment,
+        }
+        return Response(BehaviorSummarySerializer(data).data)

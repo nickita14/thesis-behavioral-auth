@@ -18,7 +18,7 @@ The novel contribution is the **coupled use of both modules**: when a behavioral
 
 ## Technology stack
 
-**Backend**: Python 3.12, Django 5.x, Django REST Framework, PostgreSQL.
+**Backend**: Python 3.13.x in the current local environment, Django 5.x, Django REST Framework, PostgreSQL.
 **ML**: scikit-learn (Isolation Forest, One-Class SVM), XGBoost (phishing URL classifier), joblib for model serialization. No deep learning in v1 — classical ML only. Author has no prior ML experience, so code should favor clarity over cleverness.
 **Frontend**: React + Vite + Tailwind + shadcn/ui. Separate SPA, not Django templates. JS collectors in the browser stream behavioral events to the backend via REST.
 **Dev tooling**: pytest, black, ruff, pre-commit.
@@ -105,14 +105,30 @@ Do not commit datasets to git. Put them in `data/raw/`, which is gitignored.
 
 ## Current status
 
-Just starting. Repository skeleton being created. No code written yet.
+The repository is no longer just a skeleton. The phishing module has a working
+backend implementation through the API layer:
+
+- `apps/phishing/extractors/` implements the URL feature extraction layer for the UCI-style phishing feature set.
+- `URLFeatureExtractor` orchestrates lexical extraction first, then runs WHOIS, SSL, HTML, and external-service extractors with timeout handling.
+- `FeatureCache` stores and retrieves serialized `URLFeatures` through Django cache.
+- `XGBoostPhishingDetector` wraps the model artifact, cache, feature pipeline, and threshold decision semantics.
+- `POST /api/phishing/check/` is implemented and returns URL risk probabilities, decision, cache status, and extracted features.
+- Phishing checks are persisted as audit records through the existing `PhishingEvent` model.
+- The phishing model path is configured via `PHISHING_MODEL_PATH`, with a local default of `data/models/phishing_xgboost_v1.joblib` at the repository root.
+
+The behavior backend collection layer is implemented for sessions, keystroke
+events, and mouse events. Anonymous behavior sessions are allowed by default in
+development/demo through `BEHAVIOR_ALLOW_ANONYMOUS_SESSIONS=True` so pre-auth
+login and phishing collection can be tested. Production transaction
+authentication should disable anonymous behavior sessions
+(`BEHAVIOR_ALLOW_ANONYMOUS_SESSIONS=False`) unless a pre-auth collection flow is
+enabled deliberately.
 
 ## What to work on next (context for new sessions)
 
-Initial priorities, in order:
-1. Set up Django project skeleton with the folder structure above.
-2. Create `apps/accounts/` with custom User model.
-3. Create `apps/behavior/` models and API endpoints for receiving behavioral events.
-4. Build minimal React frontend with keystroke collector.
-5. Set up `apps/ml_engine/interfaces.py` with abstract base classes.
-6. First real ML model: `IsolationForestDetector` on CMU keystroke data in a notebook, then integrate into `apps/ml_engine/detectors/`.
+Near-term priorities, in order:
+1. Integrate the phishing check endpoint into the frontend flow without changing detector internals.
+2. Decide where phishing checks belong in the login workflow and how the result affects UX/risk handling.
+3. Add frontend behavior collectors for the existing behavior collection API.
+4. Add deployment/runtime documentation for model artifacts and production cache/database settings.
+5. Keep thesis-facing architecture explicit: validation, extraction, caching, prediction, persistence, and HTTP response should remain separate responsibilities.

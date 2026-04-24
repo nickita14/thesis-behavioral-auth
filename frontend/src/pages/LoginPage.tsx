@@ -37,7 +37,11 @@ export function LoginPage() {
       const user = await login(values)
       setUser(user)
       collector.start()
-      await collector.startSession(false)
+      try {
+        await collector.startSession(false)
+      } catch {
+        // Behavior collection must not turn a successful auth/login into a failed login.
+      }
       navigate('/dashboard')
     } catch (err: unknown) {
       const data = (err as { response?: { data?: ApiError } }).response?.data
