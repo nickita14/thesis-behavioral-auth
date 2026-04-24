@@ -1,4 +1,4 @@
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { logout } from '@/services/auth'
 import { collector } from '@/services/collector'
@@ -10,7 +10,11 @@ interface Props {
 
 export function AppLayout({ children }: Props) {
   const { isAuthenticated, clearUser } = useAuthStore()
+  const { pathname } = useLocation()
   const navigate = useNavigate()
+  const isAuthPage = pathname === '/login' || pathname === '/register'
+  const showAuthenticatedNav = isAuthenticated && !isAuthPage
+  const showAnonymousNav = !isAuthenticated
 
   const handleLogout = async () => {
     if (collector.hasActiveSession) await collector.endSession()
@@ -27,7 +31,7 @@ export function AppLayout({ children }: Props) {
           <Link to="/" className="text-lg font-semibold tracking-tight">
             Behavioral Auth Demo
           </Link>
-          {isAuthenticated && (
+          {showAuthenticatedNav && (
             <nav className="flex items-center gap-4">
               <Link
                 to="/dashboard"
@@ -44,6 +48,26 @@ export function AppLayout({ children }: Props) {
               <Button variant="outline" size="sm" onClick={() => void handleLogout()}>
                 Logout
               </Button>
+            </nav>
+          )}
+          {showAnonymousNav && (
+            <nav className="flex items-center gap-4">
+              {pathname !== '/login' && (
+                <Link
+                  to="/login"
+                  className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Login
+                </Link>
+              )}
+              {pathname !== '/register' && (
+                <Link
+                  to="/register"
+                  className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Register
+                </Link>
+              )}
             </nav>
           )}
         </div>
