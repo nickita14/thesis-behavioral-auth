@@ -6,7 +6,9 @@ separately in Word/docx according to university requirements.
 
 ## Structure
 
-- `drafts/00_keywords.md` — keywords, terminology, and abbreviations.
+- `drafts/00_annotations.md` — Romanian, Russian, and English annotations.
+- `drafts/00_abbreviations.md` — compact list of abbreviations and terms.
+- `drafts/00_keywords.md` — original extended terminology draft; kept for reference, not used in `full_thesis_draft.md`.
 - `drafts/01_introduction.md` — introduction.
 - `drafts/02_chapter_1_theory.md` — chapter I, theory.
 - `drafts/03_chapter_2_design.md` — chapter II, system design.
