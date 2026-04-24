@@ -3,9 +3,11 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { PrivateRoute } from '@/components/PrivateRoute'
+import { DashboardPage } from '@/pages/DashboardPage'
 import { EnrollmentPage } from '@/pages/EnrollmentPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { RegisterPage } from '@/pages/RegisterPage'
+import { TransactionPage } from '@/pages/TransactionPage'
 import { ensureCsrf, getCurrentUser } from '@/services/auth'
 import { collector } from '@/services/collector'
 import { useAuthStore } from '@/store/auth'
@@ -13,7 +15,7 @@ import { useAuthStore } from '@/store/auth'
 const queryClient = new QueryClient()
 
 function AppRoutes() {
-  const { isAuthenticated, setUser, user } = useAuthStore()
+  const { isAuthenticated, setUser } = useAuthStore()
 
   useEffect(() => {
     const init = async () => {
@@ -49,12 +51,15 @@ function AppRoutes() {
           path="/dashboard"
           element={
             <PrivateRoute>
-              <div className="py-8 text-center space-y-2">
-                <h1 className="text-2xl font-semibold">Dashboard</h1>
-                <p className="text-muted-foreground">
-                  Добро пожаловать, {user?.username}. Dashboard в разработке.
-                </p>
-              </div>
+              <DashboardPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/transactions/new"
+          element={
+            <PrivateRoute>
+              <TransactionPage />
             </PrivateRoute>
           }
         />

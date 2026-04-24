@@ -78,6 +78,85 @@ export interface BehaviorSummary {
   is_enrollment: boolean
 }
 
+export interface DashboardBehaviorSession {
+  id: string
+  started_at: string
+  ended_at: string | null
+  duration_ms: number | null
+  is_enrollment: boolean
+  keystroke_count: number
+  mouse_count: number
+}
+
+export interface DashboardPhishingCheck {
+  id: string
+  url: string
+  is_phishing_predicted: boolean
+  confidence: number
+  created_at: string
+}
+
+export interface DashboardData {
+  behavior: {
+    totals: {
+      sessions: number
+      active_sessions: number
+      keystrokes: number
+      mouse: number
+    }
+    sessions: DashboardBehaviorSession[]
+  }
+  phishing: {
+    totals: {
+      checks: number
+      flagged: number
+    }
+    checks: DashboardPhishingCheck[]
+  }
+  security_status: {
+    level: 'collecting' | 'ready'
+    message: string
+    privacy_note: string
+    event_total: number
+  }
+}
+
+export type TransactionDecision = 'ALLOW' | 'CHALLENGE' | 'DENY' | 'PENDING'
+
+export interface TransactionAttemptPayload {
+  amount: string
+  currency: string
+  recipient: string
+  behavior_session_id?: string
+  target_url?: string
+}
+
+export interface TransactionAttemptResult {
+  id: string
+  amount: string
+  currency: string
+  recipient: string
+  decision: TransactionDecision
+  risk_score: number | null
+  created_at: string
+  behavior_session_id: string | null
+  target_url: string
+  phishing: {
+    available: boolean
+    decision: string
+    probability_phishing: number | null
+    probability_legitimate: number | null
+  } | null
+  behavior: {
+    available: boolean
+    decision: 'legitimate' | 'suspicious' | 'anomalous' | 'not_available'
+    anomaly_score: number | null
+    features: Record<string, number>
+  }
+  reasons: string[]
+  explanation: string
+}
+
 export interface ApiError {
   detail?: string
   [field: string]: string | string[] | undefined

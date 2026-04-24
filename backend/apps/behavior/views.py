@@ -3,7 +3,7 @@ from __future__ import annotations
 from django.db.models import Count
 from django.shortcuts import get_object_or_404
 from rest_framework import status
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -21,6 +21,8 @@ from .services import (
     BehaviorEventService,
     BehaviorSessionService,
 )
+
+DASHBOARD_LIMIT = 5
 
 
 class BehaviorSessionCreateView(APIView):
@@ -119,3 +121,88 @@ class BehaviorSummaryView(APIView):
             "is_enrollment": session.is_enrollment,
         }
         return Response(BehaviorSummarySerializer(data).data)
+
+
+class BehaviorDashboardView(APIView):
+    """GET /api/behavior/dashboard/ returns demo dashboard telemetry."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request: Request) -> Response:
+        sessions = list(
+            BehaviorSession.objects.filter(user=request.user)
+            .annotate(
+                keystroke_count=Count("keystroke_events", distinct=True),
+                mouse_count=Count("mouse_events", distinct=True),
+            )
+            .order_by("-started_at")[:DASHBOARD_LIMIT]
+        )
+        all_sessions = BehaviorSession.objects.filter(user=request.user)
+        totals = all_sessions.aggregate(
+            session_count=Count("id", distinct=True),
+            keystroke_count=Count("keystroke_events", distinct=True),
+            mouse_count=Count("mouse_events", distinct=True),
+        )
+        active_sessions = all_sessions.filter(ended_at__isnull=True).count()
+
+        from apps.phishing.models import PhishingEvent
+
+        phishing_queryset = PhishingEvent.objects.filter(session__user=request.user)
+        phishing_checks = phishing_queryset.order_by("-created_at")[:DASHBOARD_LIMIT]
+        phishing_total = phishing_queryset.count()
+        phishing_flagged = phishing_queryset.filter(is_phishing_predicted=True).count()
+        event_total = totals["keystroke_count"] + totals["mouse_count"]
+        status_level = "collecting" if active_sessions else "ready"
+
+        return Response(
+            {
+                "behavior": {
+                    "totals": {
+                        "sessions": totals["session_count"],
+                        "active_sessions": active_sessions,
+                        "keystrokes": totals["keystroke_count"],
+                        "mouse": totals["mouse_count"],
+                    },
+                    "sessions": [
+                        {
+                            "id": str(session.id),
+                            "started_at": session.started_at,
+                            "ended_at": session.ended_at,
+                            "duration_ms": session.duration_ms,
+                            "is_enrollment": session.is_enrollment,
+                            "keystroke_count": session.keystroke_count,
+                            "mouse_count": session.mouse_count,
+                        }
+                        for session in sessions
+                    ],
+                },
+                "phishing": {
+                    "totals": {
+                        "checks": phishing_total,
+                        "flagged": phishing_flagged,
+                    },
+                    "checks": [
+                        {
+                            "id": str(check.id),
+                            "url": check.url,
+                            "is_phishing_predicted": check.is_phishing_predicted,
+                            "confidence": check.confidence,
+                            "created_at": check.created_at,
+                        }
+                        for check in phishing_checks
+                    ],
+                },
+                "security_status": {
+                    "level": status_level,
+                    "message": (
+                        "Behavior collection is active; keystroke and mouse metadata is being stored."
+                        if active_sessions
+                        else "No active behavior session is open, but collected metadata remains available for audit."
+                    ),
+                    "privacy_note": (
+                        "Raw typed characters are not stored. Keystroke collection stores timing metadata and hashes only."
+                    ),
+                    "event_total": event_total,
+                },
+            }
+        )

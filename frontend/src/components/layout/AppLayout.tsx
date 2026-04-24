@@ -35,6 +35,12 @@ export function AppLayout({ children }: Props) {
               >
                 Dashboard
               </Link>
+              <Link
+                to="/transactions/new"
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                New transaction
+              </Link>
               <Button variant="outline" size="sm" onClick={() => void handleLogout()}>
                 Logout
               </Button>

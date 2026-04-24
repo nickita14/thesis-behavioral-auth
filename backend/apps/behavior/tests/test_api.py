@@ -11,6 +11,7 @@ from rest_framework.test import APIClient
 
 from apps.behavior.models import BehaviorSession, KeystrokeEvent, MouseEvent
 from apps.behavior.services import BehaviorEventService
+from apps.phishing.models import PhishingEvent
 
 
 def _session_create_url() -> str:
@@ -31,6 +32,10 @@ def _mouse_url(session_id: uuid.UUID) -> str:
 
 def _summary_url(session_id: uuid.UUID) -> str:
     return reverse("behavior:session-summary", kwargs={"session_id": session_id})
+
+
+def _dashboard_url() -> str:
+    return reverse("behavior:dashboard")
 
 
 def _keystroke_payload() -> dict:
@@ -298,3 +303,77 @@ def test_api_routes_are_wired(api_client: APIClient) -> None:
     assert api_client.get(
         reverse("behavior:session-summary", kwargs={"session_id": session_id})
     ).status_code == 200
+
+
+@pytest.mark.django_db
+def test_dashboard_returns_behavior_and_phishing_demo_data(api_client: APIClient) -> None:
+    user = get_user_model().objects.create_user(
+        username="dashboard-user",
+        password="unused-test-password",
+    )
+    other_user = get_user_model().objects.create_user(
+        username="other-dashboard-user",
+        password="unused-test-password",
+    )
+    session = BehaviorSession.objects.create(
+        user=user,
+        context={"page": "dashboard"},
+        is_enrollment=False,
+    )
+    other_session = BehaviorSession.objects.create(
+        user=other_user,
+        context={"page": "dashboard"},
+        is_enrollment=False,
+    )
+    KeystrokeEvent.objects.create(
+        behavior_session=session,
+        event_type="keydown",
+        key_code="KeyA",
+        key_value_hash="hash",
+        timestamp_ms=10,
+        relative_time_ms=10,
+    )
+    MouseEvent.objects.create(
+        behavior_session=session,
+        event_type="move",
+        x=10,
+        y=20,
+        timestamp_ms=20,
+        relative_time_ms=20,
+    )
+    PhishingEvent.objects.create(
+        session=session,
+        url="https://example.com/login",
+        url_features={"url_length": 1},
+        is_phishing_predicted=False,
+        confidence=0.93,
+    )
+    PhishingEvent.objects.create(
+        session=other_session,
+        url="https://other-user.example/login",
+        url_features={"url_length": -1},
+        is_phishing_predicted=True,
+        confidence=0.99,
+    )
+    PhishingEvent.objects.create(
+        url="https://anonymous-check.example/login",
+        url_features={"url_length": 0},
+        is_phishing_predicted=True,
+        confidence=0.88,
+    )
+    api_client.force_authenticate(user=user)
+
+    response = api_client.get(_dashboard_url())
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["behavior"]["totals"]["sessions"] == 1
+    assert data["behavior"]["totals"]["keystrokes"] == 1
+    assert data["behavior"]["totals"]["mouse"] == 1
+    assert data["behavior"]["sessions"][0]["id"] == str(session.id)
+    assert data["phishing"]["totals"]["checks"] == 1
+    assert data["phishing"]["checks"][0]["url"] == "https://example.com/login"
+    assert "key_value" not in str(data)
+    assert "other-user.example" not in str(data)
+    assert "anonymous-check.example" not in str(data)
+    assert "raw typed characters are not stored" in data["security_status"]["privacy_note"].lower()

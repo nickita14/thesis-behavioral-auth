@@ -280,6 +280,10 @@ class BehaviorCollector {
     return this.sessionToken !== null
   }
 
+  get activeSessionId() {
+    return this.sessionToken
+  }
+
   // Allow EnrollmentPage to know pending retry state
   get pendingRetryState() {
     return this.pendingRetry
