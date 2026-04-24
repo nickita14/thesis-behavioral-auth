@@ -71,6 +71,8 @@
 
 Где использовать: раздел 2.5.
 
+Файл: `docs/figures/end_to_end_flow.png` также может использоваться как компактная research-схема для разделов 2.2 и 2.7.
+
 Рис. 2.5. Архитектура behavioral AI pipeline
 Компоненты:
 - BehaviorSession
@@ -83,6 +85,10 @@
 
 Где использовать: раздел 2.6.
 
+Файл: `docs/figures/behavior_feature_groups.png`
+Назначение: показать количество признаков по группам Session, Keystroke и Mouse.
+Где использовать: раздел 2.6 или 4.4.
+
 Рис. 2.6. Матрица принятия решения по транзакции
 Показать правила:
 - phishing → DENY
@@ -93,6 +99,10 @@
 - otherwise → ALLOW
 
 Где использовать: раздел 2.7.
+
+Файл: `docs/figures/transaction_decision_matrix.png`
+Назначение: показать итоговую матрицу ALLOW / CHALLENGE / DENY.
+Где использовать: раздел 2.7 или 4.5.
 
 Рис. 2.7. Схема практического внедрения risk engine
 Компоненты:
@@ -133,6 +143,14 @@
 
 Рис. 3.8. Пример ответа API /api/phishing/check/
 Скриншот curl/Postman/браузера с JSON-ответом.
+
+Файл: `docs/figures/phishing_feature_groups.png`
+Назначение: показать группы признаков phishing-модуля: lexical, SSL/domain, HTML/JS, external/reputation.
+Где использовать: раздел 3.2 или 4.2.
+
+Файл: `docs/figures/phishing_feature_importance.png`
+Назначение: показать top-10 feature importance из XGBoost phishing artifact, если artifact доступен.
+Где использовать: раздел 4.2.
 
 Рис. 3.9. Пример ответа API /api/transactions/attempts/
 Скриншот JSON-ответа с ALLOW/CHALLENGE/DENY.

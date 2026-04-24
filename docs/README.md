@@ -31,6 +31,18 @@ separately in Word/docx according to university requirements.
 4. Insert images from `figures/` and `screenshots/` manually so captions and cross-references can be checked.
 5. Do a final pass in Word for page numbers, table of contents, figure numbering, and source formatting.
 
+## Generate Research Figures
+
+Run from the repository root:
+
+```bash
+python docs/tools/generate_research_figures.py
+```
+
+The script writes reproducible PNG figures to `docs/figures/`. If the system
+Python does not have plotting dependencies, it automatically re-runs with the
+project virtual environment at `.venv/bin/python`.
+
 ## Bibliography note
 
 `drafts/bibliography.md` is a working bibliography. Every source must be

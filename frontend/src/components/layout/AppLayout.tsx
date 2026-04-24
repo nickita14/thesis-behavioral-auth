@@ -29,7 +29,7 @@ export function AppLayout({ children }: Props) {
       <header className="border-b border-border">
         <div className="mx-auto max-w-5xl px-4 py-3 flex items-center justify-between">
           <Link to="/" className="text-lg font-semibold tracking-tight">
-            Behavioral Auth Demo
+            Behavioral Auth
           </Link>
           {showAuthenticatedNav && (
             <nav className="flex items-center gap-4">
