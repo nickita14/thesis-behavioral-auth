@@ -105,30 +105,66 @@ Do not commit datasets to git. Put them in `data/raw/`, which is gitignored.
 
 ## Current status
 
-The repository is no longer just a skeleton. The phishing module has a working
-backend implementation through the API layer:
+The project now has a working end-to-end transaction authentication demo flow:
 
-- `apps/phishing/extractors/` implements the URL feature extraction layer for the UCI-style phishing feature set.
-- `URLFeatureExtractor` orchestrates lexical extraction first, then runs WHOIS, SSL, HTML, and external-service extractors with timeout handling.
-- `FeatureCache` stores and retrieves serialized `URLFeatures` through Django cache.
-- `XGBoostPhishingDetector` wraps the model artifact, cache, feature pipeline, and threshold decision semantics.
-- `POST /api/phishing/check/` is implemented and returns URL risk probabilities, decision, cache status, and extracted features.
-- Phishing checks are persisted as audit records through the existing `PhishingEvent` model.
-- The phishing model path is configured via `PHISHING_MODEL_PATH`, with a local default of `data/models/phishing_xgboost_v1.joblib` at the repository root.
+- Phishing backend vertical slice is complete: URL feature extraction, pipeline, cache, `XGBoostPhishingDetector`, API endpoint, and `PhishingEvent` audit logging.
+- Behavior collection backend is complete for sessions, keystroke events, mouse events, summaries, and dashboard data.
+- Frontend login starts behavior collection best-effort and does not block successful authentication if collection fails.
+- Dashboard displays recent behavior sessions/events and phishing audit data without exposing raw typed key values.
+- Transaction API is implemented with `POST /api/transactions/attempts/` and `GET /api/transactions/attempts/`.
+- Transaction risk decisions now combine phishing risk and behavioral anomaly risk.
+- Behavioral feature extraction lives in `apps/ml_engine/behavior_features.py`.
+- Baseline behavioral anomaly detection lives in `apps/ml_engine/behavior_detectors.py` and uses `IsolationForest`.
 
-The behavior backend collection layer is implemented for sessions, keystroke
-events, and mouse events. Anonymous behavior sessions are allowed by default in
-development/demo through `BEHAVIOR_ALLOW_ANONYMOUS_SESSIONS=True` so pre-auth
-login and phishing collection can be tested. Production transaction
-authentication should disable anonymous behavior sessions
-(`BEHAVIOR_ALLOW_ANONYMOUS_SESSIONS=False`) unless a pre-auth collection flow is
-enabled deliberately.
+The current transaction flow is:
+
+```text
+login -> behavior collection -> transaction attempt -> phishing check
+      -> behavior anomaly score -> final transaction decision
+```
+
+The transaction decision matrix is intentionally simple and explainable:
+
+- phishing `phishing` -> `DENY`
+- phishing `suspicious` -> `CHALLENGE`
+- phishing error with `target_url` -> `CHALLENGE`
+- behavior `anomalous` -> `CHALLENGE`
+- behavior `suspicious` and amount `>= 1000` -> `CHALLENGE`
+- otherwise -> `ALLOW`
+
+The phishing model path is configured through `PHISHING_MODEL_PATH`. Anonymous
+behavior sessions are allowed by default in development/demo through
+`BEHAVIOR_ALLOW_ANONYMOUS_SESSIONS=True`, but production transaction
+authentication should disable anonymous sessions unless a deliberate pre-auth
+collection flow is being tested.
+
+## Thesis writing status
+
+Thesis drafts are stored in `docs/drafts/`. The current thesis structure is:
+
+- introduction
+- chapter I: theory
+- chapter II: system design
+- chapter III: implementation
+- chapter IV: testing and results
+- conclusion
+- bibliography
+
+Chapters 1-4 already have working drafts. The conclusion draft exists but still
+needs final writing and alignment with the implemented system. The bibliography
+is a draft and all sources must be verified before final submission.
+
+Next writing tasks:
+1. Write and finalize the conclusion.
+2. Proofread chapters 1-4 for consistency with the current implementation.
+3. Prepare diagrams and screenshots.
+4. Assemble the Word/docx version.
+5. Prepare the defense presentation.
 
 ## What to work on next (context for new sessions)
 
 Near-term priorities, in order:
-1. Integrate the phishing check endpoint into the frontend flow without changing detector internals.
-2. Decide where phishing checks belong in the login workflow and how the result affects UX/risk handling.
-3. Add frontend behavior collectors for the existing behavior collection API.
-4. Add deployment/runtime documentation for model artifacts and production cache/database settings.
-5. Keep thesis-facing architecture explicit: validation, extraction, caching, prediction, persistence, and HTTP response should remain separate responsibilities.
+1. Persist and train a per-user behavior model instead of relying only on the unfitted baseline detector.
+2. Improve the transaction UI so phishing, behavior, and final decision explanations are clearer for the thesis demo.
+3. Write thesis chapter 2 around behavioral authentication, phishing detection, and transaction risk scoring foundations.
+4. Add screenshots and diagrams for the login, behavior collection, phishing check, transaction decision, and dashboard flows.

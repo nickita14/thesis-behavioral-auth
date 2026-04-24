@@ -137,3 +137,58 @@ For production transaction authentication, set
 to an authenticated user. If pre-auth collection is needed in production, enable
 it deliberately for that flow rather than treating anonymous sessions as the
 default transaction-authentication path.
+
+## Transaction Authentication Flow
+
+The current end-to-end demo flow is:
+
+```text
+login -> behavior collection -> transaction attempt -> phishing check
+      -> behavior anomaly score -> final transaction decision
+```
+
+After login, the frontend behavior collector creates a behavior session and
+streams keystroke/mouse metadata to the backend. When the user submits a demo
+transaction, the backend creates a transaction attempt, checks the optional
+target URL with the phishing detector, extracts behavioral features from the
+provided behavior session, runs the baseline anomaly detector, and stores the
+final risk assessment.
+
+### Decision Matrix
+
+The transaction risk service currently uses an explainable skeleton policy:
+
+| Condition | Final decision |
+| --- | --- |
+| Phishing decision is `phishing` | `DENY` |
+| Phishing decision is `suspicious` | `CHALLENGE` |
+| Phishing check fails while `target_url` is present | `CHALLENGE` |
+| Behavior decision is `anomalous` | `CHALLENGE` |
+| Behavior decision is `suspicious` and amount is `>= 1000` | `CHALLENGE` |
+| Otherwise | `ALLOW` |
+
+This is intentionally not a final production risk engine. It is a thesis demo
+workflow that makes phishing and behavioral signals visible and auditable.
+
+### ML Models
+
+- **XGBoost** is used for phishing URL detection.
+- **IsolationForest** is used as the baseline behavioral anomaly detector.
+
+The behavioral detector is currently a baseline layer. Persisted per-user model
+training is a planned next step.
+
+### Privacy Note
+
+Raw typed key values are not stored. The behavior module stores timing metadata,
+mouse metadata, optional hashes, and statistical feature vectors. This keeps the
+demo useful for behavioral authentication while avoiding plaintext password or
+typed-text collection.
+
+### Manual Demo Steps
+
+1. Log in through the frontend login page.
+2. Open the dashboard and verify that behavior sessions/events are visible.
+3. Open the transaction page and submit a demo transaction with an optional target URL.
+4. Review the returned decision, phishing result, behavior result, and reasons.
+5. Use Django admin/audit records to inspect persisted phishing events, behavior sessions, and transaction risk assessments.
