@@ -75,6 +75,7 @@ class TransactionAttemptService:
             amount=amount,
             session=session,
             target_url=target_url,
+            user=user,
         )
 
         with transaction.atomic():
@@ -117,9 +118,10 @@ class TransactionAttemptService:
         amount: Decimal,
         session: BehaviorSession | None,
         target_url: str,
+        user,
     ) -> SkeletonRiskResult:
         phishing = self._evaluate_phishing(target_url)
-        behavior = self._evaluate_behavior(session)
+        behavior = self._evaluate_behavior(session, user)
         decision, reasons = self._final_decision(
             amount=amount,
             phishing=phishing,
@@ -181,7 +183,7 @@ class TransactionAttemptService:
             },
         )
 
-    def _evaluate_behavior(self, session: BehaviorSession | None) -> BehaviorRisk:
+    def _evaluate_behavior(self, session: BehaviorSession | None, user) -> BehaviorRisk:
         if session is None:
             return BehaviorRisk(
                 score=None,
@@ -196,7 +198,22 @@ class TransactionAttemptService:
 
         try:
             features = BehaviorFeatureExtractor().extract(session)
-            result = BehaviorAnomalyDetector().predict(features)
+
+            if features.keystroke_count < 10:
+                return BehaviorRisk(
+                    score=None,
+                    decision=BEHAVIOR_DECISION_SUSPICIOUS,
+                    metadata={
+                        "behavior_available": False,
+                        "behavior_decision": BEHAVIOR_DECISION_SUSPICIOUS,
+                        "behavior_anomaly_score": None,
+                        "behavior_features": asdict(features),
+                        "behavior_error": "insufficient_keystrokes",
+                    },
+                )
+
+            detector = BehaviorAnomalyDetector.from_user_profile(user)
+            result = detector.predict(features)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Transaction behavior analysis failed for %s: %s", session.id, exc)
             return BehaviorRisk(

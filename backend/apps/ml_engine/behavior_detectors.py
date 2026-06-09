@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from sklearn.ensemble import IsolationForest
 
 from .behavior_features import BehaviorFeatures
+
+logger = logging.getLogger(__name__)
 
 DECISION_LEGITIMATE = "legitimate"
 DECISION_SUSPICIOUS = "suspicious"
@@ -50,6 +53,50 @@ class BehaviorAnomalyDetector:
         if not self._is_fitted:
             return 0.0
         return float(-self.model.score_samples([features.to_vector()])[0])
+
+    @classmethod
+    def from_user_profile(cls, user) -> "BehaviorAnomalyDetector":
+        """Load detector with user's trained model.
+
+        Falls back to an unfitted detector (which returns "suspicious") when
+        the user has no active profile, or when there is a version mismatch.
+        """
+        from .models import BehaviorProfile
+        from .training import (
+            DETECTOR_VERSION,
+            FEATURE_SCHEMA_VERSION,
+            BehaviorProfileTrainer,
+        )
+
+        profile = BehaviorProfile.objects.filter(user=user, is_active=True).first()
+
+        if profile is None:
+            return cls()
+
+        if (
+            profile.feature_schema_version != FEATURE_SCHEMA_VERSION
+            or profile.detector_version != DETECTOR_VERSION
+        ):
+            logger.warning(
+                "BehaviorProfile version mismatch for user %s: "
+                "profile has schema=%s detector=%s, "
+                "current schema=%s detector=%s. Falling back to suspicious.",
+                user.username,
+                profile.feature_schema_version,
+                profile.detector_version,
+                FEATURE_SCHEMA_VERSION,
+                DETECTOR_VERSION,
+            )
+            return cls()
+
+        try:
+            model = BehaviorProfileTrainer.deserialize_model(profile.model_blob)
+            return cls(model=model)
+        except Exception as exc:
+            logger.exception(
+                "Failed to load BehaviorProfile for %s: %s", user.username, exc
+            )
+            return cls()
 
     def predict(self, features: BehaviorFeatures) -> BehaviorAnomalyResult:
         if not self._is_fitted:
