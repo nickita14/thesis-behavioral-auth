@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Logo } from '@/components/Logo'
+import { BRAND } from '@/brand'
 import { login } from '@/services/auth'
 import { collector } from '@/services/collector'
 import { useAuthStore } from '@/store/auth'
@@ -50,11 +52,19 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex justify-center py-12">
-      <Card className="w-full max-w-md">
+    <div className="flex flex-col items-center justify-center py-12">
+      {/* Logo + tagline above card */}
+      <div className="mb-8 flex flex-col items-center gap-3">
+        <Logo variant="full" size="lg" />
+        <p style={{ color: BRAND.colors.textSecondary, fontSize: 14, textAlign: 'center' }}>
+          {BRAND.tagline}
+        </p>
+      </div>
+
+      <Card className="w-full max-w-md shadow-md">
         <CardHeader>
-          <CardTitle>Вход</CardTitle>
-          <CardDescription>Войдите в свой аккаунт</CardDescription>
+          <CardTitle>Вход в личный кабинет</CardTitle>
+          <CardDescription>Введите данные вашей учётной записи</CardDescription>
         </CardHeader>
         <CardContent>
           {serverError && (
@@ -96,6 +106,10 @@ export function LoginPage() {
           </p>
         </CardContent>
       </Card>
+
+      <p className="mt-6 text-xs" style={{ color: BRAND.colors.textSecondary }}>
+        🔒 Защищено AI-аналитикой поведения · Sigur Bank © 2026
+      </p>
     </div>
   )
 }

@@ -7,6 +7,7 @@ import { DashboardPage } from '@/pages/DashboardPage'
 import { EnrollmentPage } from '@/pages/EnrollmentPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { RegisterPage } from '@/pages/RegisterPage'
+import { SecurityProfilePage } from '@/pages/SecurityProfilePage'
 import { TransactionPage } from '@/pages/TransactionPage'
 import { ensureCsrf, getCurrentUser } from '@/services/auth'
 import { collector } from '@/services/collector'
@@ -60,6 +61,14 @@ function AppRoutes() {
           element={
             <PrivateRoute>
               <TransactionPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/security-profile"
+          element={
+            <PrivateRoute>
+              <SecurityProfilePage />
             </PrivateRoute>
           }
         />
