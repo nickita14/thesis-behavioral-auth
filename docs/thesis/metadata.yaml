@@ -1,0 +1,38 @@
+# Диссертация metadata
+# Заполняется автором перед сборкой
+
+# Personal info — ОБЯЗАТЕЛЬНО заполнить
+author_ru: "МИРОНОВ НИКИТА"
+author_ro: "MIRONOV NICHITA"
+group: "MIA2402"
+
+# Thesis info
+title_ru: "Использование поведенческого анализа на основе AI для аутентификации транзакций и предотвращения phishing-атак"
+title_ro: "Utilizarea analizei comportamentale bazate pe AI pentru autentificarea tranzacțiilor și prevenirea atacurilor de tip phishing"
+title_en: "Use of AI-based behavioral analysis for transaction authentication and phishing attack prevention"
+
+# Program
+program_ru: "Прикладная информатика"
+program_ro: "Informatică Aplicată"
+domain: "0613. Разработка программного обеспечения и приложений"
+domain_ro: "0613. Dezvoltarea de software și aplicații"
+
+# Supervisor info
+supervisor_name: "Cerbu Olga"
+supervisor_title_ro: "dr., prof. univ."
+supervisor_title_ru: "доктор, профессор"
+
+# Department head
+dept_head_name: "Capcelea Titu"
+dept_head_title_ro: "dr., conf. univ."
+dept_head_title_ru: "доктор, доцент"
+
+# Year
+year: 2026
+
+# Stats — заполнятся после финальной сборки
+n_pages: 0
+n_figures: 0
+n_tables: 0
+n_appendices: 0
+n_bibliography: 0
