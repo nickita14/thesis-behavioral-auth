@@ -1,16 +1,22 @@
 from __future__ import annotations
 
+import io
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import joblib
+import numpy as np
 import pytest
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 from rest_framework.test import APIClient
+from sklearn.ensemble import IsolationForest
 
 from apps.behavior.models import BehaviorSession
 from apps.ml_engine.behavior_detectors import BehaviorAnomalyResult
 from apps.ml_engine.behavior_features import BehaviorFeatures
+from apps.ml_engine.models import BehaviorProfile
+from apps.ml_engine.training import DETECTOR_VERSION, FEATURE_SCHEMA_VERSION
 from apps.transactions.models import RiskAssessment, RiskDecision, TransactionAttempt
 
 
@@ -199,10 +205,9 @@ def test_transaction_with_own_behavior_session_includes_behavior_result() -> Non
     data = response.json()
     assert data["behavior_session_id"] == str(session.id)
     assert data["behavior"]["decision"] == "suspicious"
-    assert data["behavior"]["anomaly_score"] == 0.0
-    assert isinstance(data["behavior"]["features"], dict)
+    # Empty session → insufficient_keystrokes guard fires; score is None, not 0.0
+    assert data["behavior"]["anomaly_score"] is None
     assessment = RiskAssessment.objects.get()
-    assert assessment.behavior_score == 0.0
     assert assessment.model_versions["behavior_decision"] == "suspicious"
 
 
@@ -285,11 +290,17 @@ def test_high_amount_with_suspicious_behavior_maps_to_challenge() -> None:
     session = BehaviorSession.objects.create(user=user, context={})
     client.force_authenticate(user=user)
 
-    response = client.post(
-        _url(),
-        _payload(amount="1000.00", behavior_session_id=str(session.id)),
-        format="json",
-    )
+    # Patch keystroke_count >= 10 so the insufficient-keystrokes guard does not
+    # fire and the test reaches the intended high-amount decision branch.
+    with patch(
+        "apps.transactions.services.BehaviorFeatureExtractor.extract",
+        return_value=BehaviorFeatures(keystroke_count=15),
+    ):
+        response = client.post(
+            _url(),
+            _payload(amount="1000.00", behavior_session_id=str(session.id)),
+            format="json",
+        )
 
     assert response.status_code == 201
     data = response.json()
@@ -314,6 +325,93 @@ def test_response_includes_behavior_block() -> None:
         "anomaly_score": None,
         "features": {},
     }
+
+
+@pytest.mark.django_db
+def test_behavior_no_profile_returns_suspicious() -> None:
+    """User without a trained profile still gets 'suspicious' — cold-start unchanged."""
+    client = APIClient()
+    user = _user("no-profile-user")
+    session = BehaviorSession.objects.create(user=user, context={"page": "transaction"})
+    client.force_authenticate(user=user)
+
+    response = client.post(
+        _url(),
+        _payload(behavior_session_id=str(session.id)),
+        format="json",
+    )
+
+    assert response.status_code == 201
+    assert response.json()["behavior"]["decision"] == "suspicious"
+
+
+@pytest.mark.django_db
+def test_behavior_with_trained_profile_uses_model() -> None:
+    """User with a trained profile: from_user_profile loads the model and predict runs."""
+    rng = np.random.default_rng(0)
+    X = rng.random((60, 16)).tolist()
+    model = IsolationForest(contamination=0.1, random_state=42)
+    model.fit(X)
+    buf = io.BytesIO()
+    joblib.dump(model, buf)
+
+    client = APIClient()
+    user = _user("with-profile-user")
+    BehaviorProfile.objects.create(
+        user=user,
+        model_blob=buf.getvalue(),
+        feature_schema_version=FEATURE_SCHEMA_VERSION,
+        detector_version=DETECTOR_VERSION,
+        n_training_sessions=10,
+        n_training_samples=60,
+        training_score_mean=0.4,
+        training_score_std=0.05,
+        is_active=True,
+    )
+    session = BehaviorSession.objects.create(user=user, context={"page": "transaction"})
+    client.force_authenticate(user=user)
+
+    # Patch keystroke_count >= 10 so the insufficient-keystrokes guard does not
+    # fire and the trained model actually runs the prediction.
+    with patch(
+        "apps.transactions.services.BehaviorFeatureExtractor.extract",
+        return_value=BehaviorFeatures(keystroke_count=20),
+    ):
+        response = client.post(
+            _url(),
+            _payload(behavior_session_id=str(session.id)),
+            format="json",
+        )
+
+    assert response.status_code == 201
+    data = response.json()
+    # Model is fitted → decision is 'legitimate' or 'anomalous', never 'suspicious'
+    assert data["behavior"]["decision"] in {"legitimate", "anomalous"}
+    assert data["behavior"]["anomaly_score"] is not None
+
+
+@pytest.mark.django_db
+def test_evaluate_behavior_insufficient_keystrokes_returns_suspicious() -> None:
+    """Session with < 10 keystrokes gets suspicious, not a model prediction."""
+    client = APIClient()
+    user = _user("insuf-ks-user")
+    session = BehaviorSession.objects.create(user=user, context={})
+    client.force_authenticate(user=user)
+
+    with patch(
+        "apps.transactions.services.BehaviorFeatureExtractor.extract",
+        return_value=BehaviorFeatures(keystroke_count=3),
+    ):
+        response = client.post(
+            _url(),
+            _payload(behavior_session_id=str(session.id)),
+            format="json",
+        )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["behavior"]["decision"] == "suspicious"
+    assert data["behavior"]["available"] is False
 
 
 @pytest.mark.django_db
