@@ -9,4 +9,5 @@ urlpatterns = [
     path("api/behavior/", include("apps.behavior.urls", namespace="behavior")),
     path("api/phishing/", include("apps.phishing.urls", namespace="phishing")),
     path("api/transactions/", include("apps.transactions.urls", namespace="transactions")),
+    path("api/ml/", include("apps.ml_engine.urls", namespace="ml_engine")),
 ]
