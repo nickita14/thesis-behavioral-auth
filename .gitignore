@@ -235,10 +235,16 @@ staticfiles/
 ml_artifacts/*.pkl
 ml_artifacts/*.joblib
 ml_artifacts/*.h5
+data/models/*.joblib
+data/models/*.pkl
 data/raw/
 data/processed/
 *.csv
 !data/synthetic/seed.csv
+
+# Thesis build output (generated from Markdown — commit sources, not binaries)
+docs/thesis/output/*.docx
+docs/thesis/output/thesis_combined.md
 
 # Environment
 .env
